@@ -19,28 +19,29 @@ send-gui.ps1 / send-group-notice.ps1  →  HTTP POST  →  NapCat (127.0.0.1:300
 ### 前置条件
 
 - Windows + PowerShell 5.1
-- 已装好 NapCat，并能启动注入到 QQ；NapCat 的 OneBot HTTP 服务已被脚本访问
+- 联网（仅当需要自动下载 NapCat 时；已装则无需）
+- **QQ 官方客户端**（NapCat 需注入一个运行中的 QQ 驱动消息）
 
-### 1. 配置（重要）
+### 1. 零配置即用（推荐）
 
-复制一份 `config.example.json` 为 `config.json`（`config.json` 已加入 `.gitignore`，**不要提交**），填入你自己的值：
+最新版**无需手动配 `config.json`**。首次运行会自动完成：
 
-| 字段 | 含义 |
-|---|---|
-| `Api` | NapCat HTTP 地址，默认 `http://127.0.0.1:3000` |
-| `Token` | 接口鉴权 token，需与 NapCat 配置一致 |
-| `NapCatDir` | NapCat 安装目录（含 `launcher-user.bat` 的那个） |
-| `DefaultGroupId` | 默认目标群号（脚本未指定 `-GroupId` 时使用） |
-| `Groups` | 桌面工具下拉框里展示的群列表 `["群号 (群名)", ...]` |
+- 自动探测本机已装的 NapCat（若已安装则直接使用）
+- 检测不到 NapCat 时，弹窗询问是否**自动下载安装官方 NapCat**（约 110MB，解压到 `%USERPROFILE%\NapCat\`，仅一次）
+- 自动生成 `config.json`（API 地址、随机 token、NapCatDir 自动填充）
 
-> `message.txt`（要发的文字）和 `quotes.txt`（语录库）同样不入库，按需自建。
+> 项目内 `config.example.json` 仍保留，供需要手动微调时参考。
+>
+> `message.txt`（要发的文字）和 `quotes.txt`（语录库）不强制存在：手动输入框、随机语录模式可按需使用或自建这两个文件。
 
 ### 2. 启动桌面工具
 
 双击 `start-tool.bat`（或直接 `powershell -File send-gui.ps1`）。工具会：
-1. 自动关闭已有 QQ 并通过 NapCat 重启（NapCat 需在 QQ 启动时注入）
-2. 等待登录（必要时扫码）
-3. 登录成功即按界面设置自动发送
+1. 检查连接：已连则直接自动发送
+2. 未检测到 NapCat → 自动探测，缺失则询问并自动下载安装
+3. 自动关闭已有 QQ 并通过 NapCat 重启（NapCat 需在 QQ 启动时注入）
+4. 等待登录（必要时扫码）
+5. 登录成功即按界面设置自动发送
 
 ### 3. 使用命令行脚本
 

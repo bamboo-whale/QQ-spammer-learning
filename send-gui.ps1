@@ -9,16 +9,61 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 $script:DefaultFile = Join-Path $PSScriptRoot 'message.txt'
 $script:QuoteFile = Join-Path $PSScriptRoot 'quotes.txt'
-
-# 从同目录 config.json 读取本地敏感配置（token/路径/群号），缺省回退默认值
 $script:CfgPath = Join-Path $PSScriptRoot 'config.json'
-$script:Cfg = if (Test-Path -LiteralPath $script:CfgPath) {
-    Get-Content -LiteralPath $script:CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-} else { $null }
-$script:Api       = if ($script:Cfg) { [string]$script:Cfg.Api }        else { 'http://127.0.0.1:3000' }
-$script:Token     = if ($script:Cfg) { [string]$script:Cfg.Token }      else { '' }
-$script:NapCatDir = if ($script:Cfg) { [string]$script:Cfg.NapCatDir }  else { '' }
-$script:Groups    = if ($script:Cfg -and $script:Cfg.Groups) { @($script:Cfg.Groups) } else { @() }
+
+# ---------- 默认 NapCat 自动探测路径（多个候选，从上到下检测） ----------
+function Find-NapCatDir {
+    param([string]$Overrides)
+    $candidates = @()
+    if ($Overrides) { $candidates += Get-ChildItem $Overrides -Directory -ErrorAction SilentlyContinue }
+    $candidates += @(
+        'F:\QQdata\NapCat-QCE-v5.5.67\NapCat-QCE-Windows-x64',
+        'F:\QQdata',
+        "$env:LOCALAPPDATA\NapCat",
+        "$env:APPDATA\NapCat",
+        "$env:USERPROFILE\NapCat",
+        'C:\NapCat',
+        'D:\NapCat'
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath $c) {
+            # 优先：目录内直接有 launcher-user.bat；否则有子目录含 launcher-user.bat
+            if (Test-Path -LiteralPath (Join-Path $c 'launcher-user.bat')) { return $c }
+            $sub = Get-ChildItem -LiteralPath $c -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                   Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'launcher-user.bat') } |
+                   Select-Object -First 1
+            if ($sub) { return $sub.FullName }
+        }
+    }
+    return ''
+}
+
+# 首次运行自动生成 config.json（零配置即用；如已存在则读取）
+$script:Cfg = $null
+$autoNapCat = Find-NapCatDir
+if (Test-Path -LiteralPath $script:CfgPath) {
+    try {
+        $script:Cfg = Get-Content -LiteralPath $script:CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch { $cfgError = "config.json 解析失败，将重建：$($_.Exception.Message)" }
+}
+if (-not $script:Cfg) {
+    $randToken = -join (65..90 + 97..122 | Get-Random -Count 16 | ForEach-Object { [char]$_ })
+    $autoGroups = if ($autoNapCat) { @() } else { @() }
+    $script:Cfg = [pscustomobject]@{
+        Api           = 'http://127.0.0.1:3000'
+        Token         = $randToken
+        NapCatDir     = $autoNapCat
+        DefaultGroupId = ''
+        Groups        = $autoGroups
+    }
+    try {
+        $script:Cfg | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:CfgPath -Encoding UTF8
+    } catch { }
+}
+$script:Api       = if ($null -ne $script:Cfg.Api) { [string]$script:Cfg.Api } else { 'http://127.0.0.1:3000' }
+$script:Token     = if ($null -ne $script:Cfg.Token) { [string]$script:Cfg.Token } else { '' }
+$script:NapCatDir = if ($null -ne $script:Cfg.NapCatDir) { [string]$script:Cfg.NapCatDir } else { '' }
+$script:Groups    = if ($null -ne $script:Cfg.Groups) { @($script:Cfg.Groups) } else { @() }
 $script:Launcher  = if ($script:NapCatDir) { Join-Path $script:NapCatDir 'launcher-user.bat' } else { '' }
 
 $script:Quotes = @()
@@ -390,7 +435,88 @@ function Send-Work {
     }
 }
 
-# ---------- 自动启动流程：未连接则拉起 NapCat，登录成功后自动发送 ----------
+# ---------- NapCat 自动下载安装 ----------
+function Resolve-NapCat {
+    # 返回 True 表示已就绪（连接/启动路径可用）；False 表示失败需要停止
+    if ($script:Launcher -and (Test-Path -LiteralPath $script:Launcher)) { return $true }
+    # 重新探测一次（可能用户手动放置了）
+    $found = Find-NapCatDir
+    if ($found -and (Test-Path -LiteralPath (Join-Path $found 'launcher-user.bat'))) {
+        $script:NapCatDir = $found
+        $script:Launcher = Join-Path $found 'launcher-user.bat'
+        $script:Cfg.NapCatDir = $found
+        try { $script:Cfg | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:CfgPath -Encoding UTF8 } catch { }
+        return $true
+    }
+    # 询问是否自动下载
+    $dl = [System.Windows.Forms.MessageBox]::Show(
+        "未检测到 NapCat（QQ 机器人框架）。`n`n点击【是】自动下载安装官方 NapCat（约 110MB，需联网，仅首次）。`n点击【否】则跳过本次启动。",
+        '需要 NapCat',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($dl -ne [System.Windows.Forms.DialogResult]::Yes) {
+        Add-Log '用户选择不下载 NapCat，已跳过本次启动。' 'Orange'
+        Set-Status '缺少 NapCat，未启动' 'Orange'
+        return $false
+    }
+    $installed = Install-NapCat
+    if ($installed -and (Test-Path -LiteralPath $script:Launcher)) {
+        Add-Log ("NapCat 已就绪：{0}" -f $script:NapCatDir) 'Green'
+        return $true
+    }
+    Add-Log 'NapCat 安装失败，请手动处理。' 'Red'
+    Set-Status 'NapCat 安装失败' 'Red'
+    return $false
+}
+
+function Install-NapCat {
+    $ver = 'v4.18.5'
+    $url = "https://github.com/NapNeko/NapCatQQ/releases/download/$ver/NapCat.Shell.Windows.Node.zip"
+    $destRoot = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'NapCat' } else { 'C:\NapCat' }
+    New-Item -ItemType Directory -Path $destRoot -Force | Out-Null
+    $zip = Join-Path $destRoot "napcat-$ver.zip"
+    $targetDir = Join-Path $destRoot "NapCat-$ver"
+    try {
+        Set-Status "正在下载 NapCat $ver（约110MB）..." 'Orange'
+        Add-Log "开始下载：$url" 'Black'
+        [System.Windows.Forms.Application]::DoEvents()
+        $Progress = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
+        if (-not (Test-Path -LiteralPath $zip)) { throw '下载失败：未创建文件' }
+        $size = (Get-Item $zip).Length
+        Add-Log ("下载完成：{0} MB" -f [math]::Round($size / 1MB, 1)) 'Green'
+        Set-Status "正在解压 NapCat ..." 'Orange'
+        [System.Windows.Forms.Application]::DoEvents()
+        if (Test-Path -LiteralPath $targetDir) { Remove-Item $targetDir -Recurse -Force }
+        Expand-Archive -LiteralPath $zip -DestinationPath $targetDir -Force -ErrorAction Stop
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        # 在解压目录内找 launcher-user.bat（可能在子目录）
+        $launcher = Get-ChildItem -LiteralPath $targetDir -Recurse -Depth 3 -Filter 'launcher-user.bat' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $launcher) {
+            # 回退：找任意的 bat 启动器或直接认为目录即根
+            $launcher = Get-ChildItem -LiteralPath $targetDir -Recurse -Depth 3 -Filter 'launcher*.bat' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if ($launcher) {
+            $script:NapCatDir = $launcher.DirectoryName
+        } else {
+            $script:NapCatDir = $targetDir
+        }
+        $script:Launcher = Join-Path $script:NapCatDir 'launcher-user.bat'
+        if (-not (Test-Path -LiteralPath $script:Launcher)) {
+            $alt = Get-ChildItem -LiteralPath $script:NapCatDir -Filter '*user*.bat' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($alt) { $script:Launcher = $alt.FullName }
+        }
+        $script:Cfg.NapCatDir = $script:NapCatDir
+        try { $script:Cfg | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:CfgPath -Encoding UTF8 } catch { }
+        Add-Log ("NapCat 已安装到：{0}" -f $script:NapCatDir) 'Green'
+        return $true
+    } catch {
+        Add-Log ("下载/安装失败：{0}" -f $_.Exception.Message) 'Red'
+        return $false
+    }
+}
+
 function Auto-Boot {
     Add-Log '=== 自动流程开始 ===' 'Black'
     try {
@@ -401,11 +527,15 @@ function Auto-Boot {
             return
         }
     } catch { }
-    Add-Log '未检测到 NapCat，正在自动启动（会重启 QQ）...' 'Black'
+    Add-Log '未检测到 NapCat 服务，检查安装状态...' 'Black'
+    # 确保 NapCat 已安装（缺失则自动下载安装）
+    $ready = Resolve-NapCat
+    if (-not $ready) { return }
     if (-not (Test-Path -LiteralPath $script:Launcher)) {
-        Add-Log ("找不到 NapCat 启动器：{0}`n请手动运行 start-napcat.bat" -f $script:Launcher) 'Red'
+        Add-Log ("仍找不到 NapCat 启动器：{0}`n请手动运行 start-napcat.bat" -f $script:Launcher) 'Red'
         return
     }
+    Add-Log '正在自动启动 NapCat（会重启 QQ）...' 'Black'
     try {
         # 经 cmd.exe 重定向，可静默杀掉已运行的 QQ（即使 QQ 未运行也不会抛"进程未找到"错）
         cmd.exe /c "taskkill /F /IM QQ.exe  2>nul & taskkill /F /IM QQEX.exe 2>nul"
