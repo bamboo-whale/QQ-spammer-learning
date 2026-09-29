@@ -1,0 +1,10 @@
+{
+    "Api": "http://127.0.0.1:3000",
+    "Token": "YOUR_NAPCAT_TOKEN",
+    "NapCatDir": "C:\\path\\to\\NapCat-QCE-Windows-x64",
+    "DefaultGroupId": "YOUR_GROUP_ID",
+    "Groups": [
+        "YOUR_GROUP_ID (群名A)",
+        "YOUR_GROUP_ID2 (群名B)"
+    ]
+}

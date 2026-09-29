@@ -1,0 +1,27 @@
+# 隐私与本地配置（绝不入库，含你的 token / 群号 / 本地路径）
+config.json
+
+# 消息内容文件（含群主题内容）
+message.txt
+quotes.txt
+
+# 构建产物 / 二进制
+QQ群发小工具.exe
+appicon.ico
+appicon_raw.jpg
+launcher.cs
+*.exe
+*.ico
+*.png
+*.jpg
+
+# 运行时日志
+gui-err.log
+gui-out.log
+*.log
+
+# 操作系统 / 编辑器
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
