@@ -17,13 +17,13 @@ function Find-NapCatDir {
     $candidates = @()
     if ($Overrides) { $candidates += Get-ChildItem $Overrides -Directory -ErrorAction SilentlyContinue }
     $candidates += @(
-        'F:\QQdata\NapCat-QCE-v5.5.67\NapCat-QCE-Windows-x64',
-        'F:\QQdata',
         "$env:LOCALAPPDATA\NapCat",
         "$env:APPDATA\NapCat",
         "$env:USERPROFILE\NapCat",
+        "$env:USERPROFILE\Documents\NapCat",
         'C:\NapCat',
-        'D:\NapCat'
+        'D:\NapCat',
+        'C:\QQdata'
     )
     foreach ($c in $candidates) {
         if (Test-Path -LiteralPath $c) {
