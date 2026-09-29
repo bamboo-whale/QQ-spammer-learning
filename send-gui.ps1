@@ -71,6 +71,12 @@ if (Test-Path -LiteralPath $script:QuoteFile) {
     $script:Quotes = Get-Content -LiteralPath $script:QuoteFile -Encoding UTF8 | Where-Object { $_.Trim() }
 }
 
+# UI 刷新辅助（无 GUI 环境静默），供可能在无界面上下文调用的函数使用
+if (-not ('System.Windows.Forms.Application' -as [type])) { Add-Type -AssemblyName System.Windows.Forms }
+function Invoke-DoEvents {
+    try { [System.Windows.Forms.Application]::DoEvents() } catch { }
+}
+
 # ---------- 工具函数 ----------
 function New-JitterText {
     param(
@@ -471,23 +477,24 @@ function Resolve-NapCat {
 }
 
 function Install-NapCat {
+    param([string]$DestRoot = '')
     $ver = 'v4.18.5'
     $url = "https://github.com/NapNeko/NapCatQQ/releases/download/$ver/NapCat.Shell.Windows.Node.zip"
-    $destRoot = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'NapCat' } else { 'C:\NapCat' }
-    New-Item -ItemType Directory -Path $destRoot -Force | Out-Null
-    $zip = Join-Path $destRoot "napcat-$ver.zip"
-    $targetDir = Join-Path $destRoot "NapCat-$ver"
+    if (-not $DestRoot) { $DestRoot = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'NapCat' } else { 'C:\NapCat' } }
+    New-Item -ItemType Directory -Path $DestRoot -Force | Out-Null
+    $zip = Join-Path $DestRoot "napcat-$ver.zip"
+    $targetDir = Join-Path $DestRoot "NapCat-$ver"
     try {
         Set-Status "正在下载 NapCat $ver（约110MB）..." 'Orange'
         Add-Log "开始下载：$url" 'Black'
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-DoEvents
         $Progress = 'SilentlyContinue'
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
         if (-not (Test-Path -LiteralPath $zip)) { throw '下载失败：未创建文件' }
         $size = (Get-Item $zip).Length
         Add-Log ("下载完成：{0} MB" -f [math]::Round($size / 1MB, 1)) 'Green'
         Set-Status "正在解压 NapCat ..." 'Orange'
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-DoEvents
         if (Test-Path -LiteralPath $targetDir) { Remove-Item $targetDir -Recurse -Force }
         Expand-Archive -LiteralPath $zip -DestinationPath $targetDir -Force -ErrorAction Stop
         Remove-Item $zip -Force -ErrorAction SilentlyContinue
